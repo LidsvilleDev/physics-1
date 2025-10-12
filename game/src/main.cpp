@@ -12,6 +12,8 @@ See documentation here: https://www.raylib.com/, and examples here: https://www.
 
 Vector2 screenSize = { 800, 800 };
 
+float dt = 0.0f;
+
 class PhysicsBody 
 {
 public:
@@ -19,46 +21,124 @@ public:
     Vector2 position;
     float drag;
     float mass;
-    float radius;
+    Color color;
 
-    PhysicsBody(Vector2 vel, Vector2 pos, float d, float m, float r) {
-        velocity = vel;
-        position = pos;
-        drag = d;
-        mass = m;
-        radius = r;
+    PhysicsBody(Vector2 vel, Vector2 pos, float d, float m, Color c) : velocity(vel), position(pos), drag(d), mass(m), color(c) {}
+    PhysicsBody(Vector2 vel, Vector2 pos, float d, float m) : velocity(vel), position(pos), drag(d), mass(m) { color = BLACK; }
+
+    virtual void draw()
+    {
+        return;
     }
 };
+
+class PhysicsRectangle : public PhysicsBody 
+{
+public:
+    Vector2 size;
+
+    void draw() override
+    {
+        DrawRectangle(position.x, position.y, size.x, size.y, color);
+    }
+};
+
+class PhysicsCircle : public PhysicsBody
+{
+public:
+    float radius;
+    
+    PhysicsCircle(Vector2 vel, Vector2 pos, float d, float m, Color c, float r) : PhysicsBody(vel, pos, d, m, c) { radius = r; };
+
+    void draw() override
+    {
+        DrawCircle(position.x, position.y, radius, color);
+    }
+};
+
+bool CircleCircleOverlap(PhysicsCircle* circleA, PhysicsCircle* circleB) {
+    Vector2 displacement = circleB->position - circleA->position;
+    float distance = Vector2Length(displacement);
+    float overlap = circleA->radius + circleB->radius - distance;
+    if (overlap >= 0.0f) { return true; }
+    else { return false; }
+}
+
+bool CircleOffTop(PhysicsCircle* circle) {
+    if (circle->position.y <= 0 + circle->radius) { return true; }
+    else { return false; }
+}
+
+bool CircleOffSide(PhysicsCircle* circle) {
+    if (circle->position.x >= screenSize.x - circle->radius || circle->position.x <= 0 + circle->radius) { return true; }
+    else { return false; }
+}
+
+bool CircleOffBottom(PhysicsCircle* circle) {
+    if (circle->position.y >= screenSize.y - circle->radius) { return true; }
+    else { return false; }
+}
 
 class PhysicsSimulation
 {
 public:
-    float dt;
     Vector2 gravity = { 0.0f, 9.81f };
 
-    std::vector<PhysicsBody> bodies;
+    std::vector<PhysicsBody*> bodies;
 
-    void simulate_world() {
-        dt = GetFrameTime();
-        for (PhysicsBody& b : bodies) {
+    void add(PhysicsBody* newBody) {
+        bodies.push_back(newBody);
+    }
 
-            b.velocity += gravity * dt;
-            b.position += b.velocity * dt;
+    void check_collisions(size_t index) {
+        PhysicsBody* bodyPointerA = bodies[index];
+        PhysicsCircle* birdPointerA = (PhysicsCircle*)bodyPointerA;
+        birdPointerA->color = GREEN;
+            
+        for (size_t j = 0; j < bodies.size(); j++) {
+            if (j != index) {
+                PhysicsBody* bodyPointerB = bodies[j];
+                PhysicsCircle* birdPointerB = (PhysicsCircle*)bodyPointerB;
 
-            if (b.position.y >= screenSize.y - b.radius)
+                bool isOverlap = CircleCircleOverlap(birdPointerA, birdPointerB);
+                if (isOverlap) { birdPointerA->color = RED; }
+            }
+        }
+    }
+
+    void simulate_body(size_t index) {
+        PhysicsBody* b = bodies[index];
+        
+        b->velocity += gravity * dt * 2.5f;
+        b->position += b->velocity * dt * 2.5f;
+
+        if (dynamic_cast<PhysicsCircle*>(b) != nullptr)
+        {
+            PhysicsCircle* birdPointer = (PhysicsCircle*)b;
+            if (CircleOffBottom(birdPointer))
             {
-                b.position.y = screenSize.y - b.radius;
                 // Making it appear as if the bird gradually slows down upon landing
-                b.velocity.x -= b.velocity.x / b.drag * dt;
+                birdPointer->position.y = screenSize.y - birdPointer->radius;
+                birdPointer->velocity.x -= birdPointer->velocity.x / birdPointer->drag * dt;
             }
 
             // Bouncing the bird if it hits the top of the screen or either side of the screen
-            if (b.position.x >= screenSize.x - b.radius || b.position.x <= 0 + b.radius) {
-                b.velocity.x *= -1;
-            }
-            if (b.position.y <= 0 + b.radius) {
-                b.velocity.y *= -1;
-            }
+            if (CircleOffSide(birdPointer)) { birdPointer->velocity.x *= -1; }
+            if (CircleOffTop(birdPointer)) { birdPointer->velocity.y *= -1; }
+        }
+
+        check_collisions(index);
+    }
+
+    void simulate_world() {
+        for (size_t i = 0; i < bodies.size(); i++) {
+            simulate_body(i);
+        }
+    }
+
+    void draw_world() {
+        for (size_t i = 0; i < bodies.size(); i++) {
+            bodies[i]->draw();
         }
     }
 };
@@ -74,11 +154,9 @@ float launchAngle = 0.0f;
 Vector2 launchPosition = { platform.x + platform.width - birdRadius, platform.y - (platform.height - birdRadius) };
 Vector2 launchVelocity = Vector2Rotate(Vector2UnitX, launchAngle) * launchSpeed;
 
-PhysicsBody bird(launchVelocity, launchPosition, 0.93f, 0.0f, birdRadius);
+PhysicsCircle bird(launchVelocity, launchPosition, 0.93f, 0.0f, GREEN, birdRadius);
 
 PhysicsSimulation simulation;
-
-float dt = 0.0f;
 
 void update()
 {
@@ -90,9 +168,13 @@ void update()
 
     if (IsKeyPressed(KEY_SPACE))
     {
-        bird.position = launchPosition;
         bird.velocity = launchVelocity;
-        simulation.bodies.push_back(bird);
+        bird.position = launchPosition;
+        //PhysicsCircle* newBird = new PhysicsCircle(launchVelocity, launchPosition, 0.93f, 0.0, birdRadius, GREEN);
+        PhysicsCircle* newBird = new PhysicsCircle(bird);
+        newBird->radius = rand() % 10 + 10;
+
+        simulation.add(newBird);
     }
 
     // Input for increasing/decreasing bird.drag (1/2)
@@ -138,10 +220,7 @@ void draw()
     DrawCircleV(launchPosition, bird.radius, ORANGE);
 
     // All of our birds current position(s)
-    for (PhysicsBody& b : simulation.bodies)
-    {
-        DrawCircleV(b.position, bird.radius, RED);
-    }
+    simulation.draw_world();
 
     // Ground at the bottom of the screen, and a platform 3/4's the way down the screen
     DrawRectangleRec(platform, BLACK);
