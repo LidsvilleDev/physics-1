@@ -5,13 +5,14 @@
 struct PhysicsBody
 {
     int id = -1;
+    float time = 0.0f;
     Vector2 position = Vector2Zeros;
     Vector2 velocity = Vector2Zeros;
 };
 
 struct PhysicsWorld
 {
-    Vector2 gravity = { 0.0f, 9.81f };
+    Vector2 gravity = { 0.0f, 1.6f };
     std::vector<PhysicsBody> entities;
 };
 
@@ -21,29 +22,19 @@ constexpr float LAUNCH_HEIGHT = 600.0f;
 int main()
 {
     // An example of using C file libraries + raylib (which also uses C files internally)!
-    char* testData = new char[2048];
+    char* testData = new char[8192];
     int byteCount = 0;
-    for (int i = 0; i < 3; i++)
-    {
-        int testNumber = i + 1;
-        float testRange = 100.0f;
-        float testTime = 500.0f;
-        byteCount += sprintf(testData + byteCount, "Range %i: %f units, Time %i: %f seconds.\n", testNumber, testRange, testNumber, testTime);
-    }
-
-    const char* fileName = "test.txt";
-    SaveFileText(fileName, testData);               // <-- Creates a new empty file (deletes previous file if there was one with the same name)
-    delete[] testData;
-
-    char* fileData = LoadFileText(fileName);        // <-- Loads a file as text data. File must exist otherwise an error is output to the console!
-    TraceLog(LOG_INFO, "File data: %s", fileData);  // Output our test (C-style) string to the console!
 
     PhysicsWorld world;
+
+    std::vector<float> launchAngles = { 0.0f, 3.189f, 6.42f, 9.736f, 13.194f,
+        16.874f, 20.905f, 25.529f, 31.367f, 45.0f, 58.633f, 64.471f, 69.095f, 
+        73.126f, 76.806f, 80.264f, 83.58f, 86.81f, 90.0f };
     
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < launchAngles.size(); i++)
     {
-        float launchAngle = (i + 1) * 10.0f * DEG2RAD;
-        float launchSpeed = 100.0f;
+        float launchAngle = launchAngles[i] * DEG2RAD;
+        float launchSpeed = 120.0f;
 
         PhysicsBody entity{};
         entity.id = i;
@@ -59,30 +50,36 @@ int main()
         float dt = GetFrameTime();
 
         // Motion loop
-        for (size_t i = 0; i < world.entities.size(); i++)
+        for (PhysicsBody& e : world.entities)
         {
-            PhysicsBody& e = world.entities[i];
             Vector2 acc = world.gravity;
 
             e.velocity += acc * dt;             // v = a * t
             e.position += e.velocity * dt;      // p = v * t
+
+            e.time += dt;
         }
 
         // Collision loop
         world.entities.erase(std::remove_if(world.entities.begin(), world.entities.end(),
-            [](PhysicsBody& entity)
+            [&](PhysicsBody& entity)
             {
                 bool remove = entity.position.y >= LAUNCH_HEIGHT;
                 if (remove)
                 {
-                    TraceLog(LOG_INFO, "Entity %i has hit the ground at %f.\n", entity.id, entity.position.x);
-                    // entity.position.x is the projectile's range
-                    // TODO -- Figure out how to keep track of each projectile's flight time!
-                    // TODO -- Figure out how to export all desired data to a .txt or .csv file!
+                    byteCount += sprintf(testData + byteCount, "Test #%i Range: %f units, Time: %f seconds.\n", entity.id, entity.position.x, entity.time);
                 }
                 return remove;
             }
         ), world.entities.end());
+        
+        if (world.entities.size() == 0)
+        {
+            const char* fileName = "test_output.txt";
+            SaveFileText(fileName, testData);
+            delete[] testData;
+            break;
+        }
 
         // Render loop
         BeginDrawing();
