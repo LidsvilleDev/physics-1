@@ -187,12 +187,7 @@ public:
                 PhysicsCircle* birdPointerB = (PhysicsCircle*)bodyPointerB;
 
                 bool didOverlap = false;
-                if (shapeOfA == CIRCLE && shapeOfB == CIRCLE) { 
-                    didOverlap = CircleCircleOverlap((PhysicsCircle*)bodyPointerA, (PhysicsCircle*)bodyPointerB); 
-                    //if (didOverlap) {
-                    //    TranslateCircleCircleOverlap((PhysicsCircle*)bodyPointerA, (PhysicsCircle*)bodyPointerB);
-                    //}
-                }
+                if (shapeOfA == CIRCLE && shapeOfB == CIRCLE) {  didOverlap = CircleCircleOverlap((PhysicsCircle*)bodyPointerA, (PhysicsCircle*)bodyPointerB); }
                 else if (shapeOfA == CIRCLE && shapeOfB == HALF_SPACE) { didOverlap = CircleHalfspaceOverlap((PhysicsCircle*)bodyPointerA, (PhysicsHalfspace*)bodyPointerB); }
                 else if (shapeOfA == HALF_SPACE && shapeOfB == CIRCLE) { didOverlap = CircleHalfspaceOverlap((PhysicsCircle*)bodyPointerB, (PhysicsHalfspace*)bodyPointerA); }
 
