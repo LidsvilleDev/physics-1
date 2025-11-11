@@ -9,27 +9,34 @@ See documentation here: https://www.raylib.com/, and examples here: https://www.
 #include "raygui.h"
 #include "game.h"
 #include <vector>
+#include <iostream>
 
 Vector2 screenSize = { 800, 800 };
 
 float dt = 0.0f;
 
+enum PhysicsShape {
+    CIRCLE,
+    RECTANGLE,
+    HALF_SPACE
+};
+
 class PhysicsBody 
 {
 public:
+    bool isStatic;
     Vector2 velocity;
     Vector2 position;
     float drag;
     float mass;
     Color color;
 
-    PhysicsBody(Vector2 vel, Vector2 pos, float d, float m, Color c) : velocity(vel), position(pos), drag(d), mass(m), color(c) {}
-    PhysicsBody(Vector2 vel, Vector2 pos, float d, float m) : velocity(vel), position(pos), drag(d), mass(m) { color = BLACK; }
+    PhysicsBody(Vector2 vel, Vector2 pos, float d, float m, Color c, bool s) : velocity(vel), position(pos), drag(d), mass(m), color(c), isStatic(s) {}
+    PhysicsBody(Vector2 vel, Vector2 pos, float d, float m, bool s) : velocity(vel), position(pos), drag(d), mass(m), isStatic(s) { color = BLACK; }
 
-    virtual void draw()
-    {
-        return;
-    }
+    virtual void draw() { return; }
+
+    virtual PhysicsShape Shape() = 0;
 };
 
 class PhysicsRectangle : public PhysicsBody 
@@ -37,10 +44,14 @@ class PhysicsRectangle : public PhysicsBody
 public:
     Vector2 size;
 
+    PhysicsRectangle(Vector2 vel, Vector2 pos, float d, float m, Color c, Vector2 si, bool s) : PhysicsBody(vel, pos, d, m, c, s) { size = si; };
+
     void draw() override
     {
         DrawRectangle(position.x, position.y, size.x, size.y, color);
     }
+
+    PhysicsShape Shape() override { return RECTANGLE; };
 };
 
 class PhysicsCircle : public PhysicsBody
@@ -48,20 +59,94 @@ class PhysicsCircle : public PhysicsBody
 public:
     float radius;
     
-    PhysicsCircle(Vector2 vel, Vector2 pos, float d, float m, Color c, float r) : PhysicsBody(vel, pos, d, m, c) { radius = r; };
+    PhysicsCircle(Vector2 vel, Vector2 pos, float d, float m, Color c, float r, bool s) : PhysicsBody(vel, pos, d, m, c, s) { radius = r; };
 
     void draw() override
     {
         DrawCircle(position.x, position.y, radius, color);
     }
+
+    PhysicsShape Shape() override { return CIRCLE; };
+};
+
+
+class PhysicsHalfspace : public PhysicsBody
+{
+private:
+    float rotation = 0;
+    Vector2 normal = { 0, -1 };
+
+public:
+    PhysicsHalfspace(Vector2 vel, Vector2 pos, float d, float m, Color c, bool s, float rot, Vector2 nor) : PhysicsBody(vel, pos, d, m, c, s) { rotation = rot, normal = nor; };
+
+    void setRotationDegrees(float rotationInDegrees)
+    {
+        rotation = rotationInDegrees;
+        normal = Vector2Rotate({ 0, -1 }, rotation * DEG2RAD);
+    }
+
+    float getRotation() { return rotation; }
+
+    Vector2 getNormal() { return normal; }
+
+    void draw() override
+    {
+        //Draw arbitrary point on the line
+        DrawCircle(position.x, position.y, 8, color);
+
+        //Draw normal vector, perpendicular to the surface
+        DrawLineEx(position, position + normal * 30, 1, color);
+
+        //Draw the line/surface
+        //Rotate function takes radians. 360 degrees = 2PI radians 
+        Vector2 parallelToSurface = Vector2Rotate(normal, PI * 0.5f);
+        DrawLineEx(position - parallelToSurface * 4000, position + parallelToSurface * 4000, 1, color);
+    }
+
+    PhysicsShape Shape() override { return HALF_SPACE; }
 };
 
 bool CircleCircleOverlap(PhysicsCircle* circleA, PhysicsCircle* circleB) {
     Vector2 displacement = circleB->position - circleA->position;
     float distance = Vector2Length(displacement);
     float overlap = circleA->radius + circleB->radius - distance;
-    if (overlap >= 0.0f) { return true; }
+    if (overlap >= 0) 
+    {
+        Vector2 normalAtoB;
+        
+        if (abs(distance) < 0.0001f) { normalAtoB = { 0, 1 }; }
+        else { normalAtoB = displacement / distance; }
+
+        Vector2 mtv = normalAtoB * overlap;
+
+        circleA->position -= mtv * 0.5f;
+        circleB->position += mtv * 0.5f;
+
+        return true; 
+    }
     else { return false; }
+}
+
+bool CircleHalfspaceOverlap(PhysicsCircle* circle, PhysicsHalfspace* halfspace)
+{
+    Vector2 displacementToCircle = circle->position - halfspace->position;
+
+    float dot = Vector2DotProduct(displacementToCircle, halfspace->getNormal());
+    Vector2 projectionDisplacementOntoNormal = halfspace->getNormal() * dot;
+
+    DrawLineEx(circle->position, circle->position - projectionDisplacementOntoNormal, 1, GRAY);
+    Vector2 midpoint = circle->position - projectionDisplacementOntoNormal * 0.5f;
+    DrawText(TextFormat("D: %6.0f", dot), midpoint.x, midpoint.y, 30, GRAY);
+
+    float overlap = dot < circle->radius;
+
+    if (overlap > 0)
+    {
+        Vector2 mtv = halfspace->getNormal() * overlap;
+        circle->position += mtv;
+    }
+
+    return overlap;
 }
 
 bool CircleOffTop(PhysicsCircle* circle) {
@@ -92,39 +177,52 @@ public:
 
     void check_collisions(size_t index) {
         PhysicsBody* bodyPointerA = bodies[index];
-        PhysicsCircle* birdPointerA = (PhysicsCircle*)bodyPointerA;
-        birdPointerA->color = GREEN;
+        PhysicsShape shapeOfA = bodyPointerA->Shape();
+        bodyPointerA->color = GREEN;
             
         for (size_t j = 0; j < bodies.size(); j++) {
             if (j != index) {
                 PhysicsBody* bodyPointerB = bodies[j];
+                PhysicsShape shapeOfB = bodyPointerB->Shape();
                 PhysicsCircle* birdPointerB = (PhysicsCircle*)bodyPointerB;
 
-                bool isOverlap = CircleCircleOverlap(birdPointerA, birdPointerB);
-                if (isOverlap) { birdPointerA->color = RED; }
+                bool didOverlap = false;
+                if (shapeOfA == CIRCLE && shapeOfB == CIRCLE) { 
+                    didOverlap = CircleCircleOverlap((PhysicsCircle*)bodyPointerA, (PhysicsCircle*)bodyPointerB); 
+                    //if (didOverlap) {
+                    //    TranslateCircleCircleOverlap((PhysicsCircle*)bodyPointerA, (PhysicsCircle*)bodyPointerB);
+                    //}
+                }
+                else if (shapeOfA == CIRCLE && shapeOfB == HALF_SPACE) { didOverlap = CircleHalfspaceOverlap((PhysicsCircle*)bodyPointerA, (PhysicsHalfspace*)bodyPointerB); }
+                else if (shapeOfA == HALF_SPACE && shapeOfB == CIRCLE) { didOverlap = CircleHalfspaceOverlap((PhysicsCircle*)bodyPointerB, (PhysicsHalfspace*)bodyPointerA); }
+
+                if (didOverlap) { bodyPointerA->color = RED; }
             }
         }
     }
 
     void simulate_body(size_t index) {
         PhysicsBody* b = bodies[index];
-        
-        b->velocity += gravity * dt * 2.5f;
-        b->position += b->velocity * dt * 2.5f;
 
-        if (dynamic_cast<PhysicsCircle*>(b) != nullptr)
+        if (!b->isStatic)
         {
-            PhysicsCircle* birdPointer = (PhysicsCircle*)b;
-            if (CircleOffBottom(birdPointer))
-            {
-                // Making it appear as if the bird gradually slows down upon landing
-                birdPointer->position.y = screenSize.y - birdPointer->radius;
-                birdPointer->velocity.x -= birdPointer->velocity.x / birdPointer->drag * dt;
-            }
+            b->velocity += gravity * dt * 2.5f;
+            b->position += b->velocity * dt * 2.5f;
 
-            // Bouncing the bird if it hits the top of the screen or either side of the screen
-            if (CircleOffSide(birdPointer)) { birdPointer->velocity.x *= -1; }
-            if (CircleOffTop(birdPointer)) { birdPointer->velocity.y *= -1; }
+            if (dynamic_cast<PhysicsCircle*>(b) != nullptr)
+            {
+                PhysicsCircle* birdPointer = (PhysicsCircle*)b;
+                if (CircleOffBottom(birdPointer))
+                {
+                    // Making it appear as if the bird gradually slows down upon landing
+                    birdPointer->position.y = screenSize.y - birdPointer->radius;
+                    birdPointer->velocity.x -= birdPointer->velocity.x / birdPointer->drag * dt;
+                }
+
+                // Bouncing the bird if it hits the top of the screen or either side of the screen
+                if (CircleOffSide(birdPointer)) { birdPointer->velocity.x *= -1; }
+                if (CircleOffTop(birdPointer)) { birdPointer->velocity.y *= -1; }
+            }
         }
 
         check_collisions(index);
@@ -154,8 +252,9 @@ float launchAngle = 0.0f;
 Vector2 launchPosition = { platform.x + platform.width - birdRadius, platform.y - (platform.height - birdRadius) };
 Vector2 launchVelocity = Vector2Rotate(Vector2UnitX, launchAngle) * launchSpeed;
 
-PhysicsCircle bird(launchVelocity, launchPosition, 0.93f, 0.0f, GREEN, birdRadius);
+PhysicsCircle bird(launchVelocity, launchPosition, 0.93f, 0.0f, GREEN, birdRadius, false);
 
+PhysicsHalfspace halfspace({ 0, 0 }, { 0, 0 }, 1, 1, ORANGE, true, 0, { 0, -1 });
 PhysicsSimulation simulation;
 
 void update()
@@ -236,12 +335,24 @@ void draw()
     DrawText(TextFormat("Bird Velocity: %f %f", bird.velocity.x, bird.velocity.y), 10, 100, 20, GOLD);
     DrawText(TextFormat("Bird Drag: %f", bird.drag), 10, 130, 20, VIOLET);
     DrawText(TextFormat("Gravity: %f %f", simulation.gravity.x, simulation.gravity.y), 10, 160, 20, VIOLET);
+
+    //Controls for halfspace
+    GuiSliderBar(Rectangle{ 20, 200, 240, 30 }, "X", TextFormat("%.0f", halfspace.position.x), &halfspace.position.x, 0, GetScreenWidth());
+    GuiSliderBar(Rectangle{ screenSize.x/3+20, 200, 240, 30 }, "Y", TextFormat("%.0f", halfspace.position.y), &halfspace.position.y, 0, GetScreenHeight());
+
+    float halfspaceRotation = halfspace.getRotation();
+    GuiSliderBar(Rectangle{ screenSize.x/3*2+20, 200, 200, 30 }, "Rotation", TextFormat("%.0f", halfspace.getRotation()), &halfspaceRotation, -360, 360);
+    halfspace.setRotationDegrees(halfspaceRotation);
+
     EndDrawing();
 }
 
 int main()
 {
     InitWindow(screenSize.x, screenSize.y, "Physics-1");
+    halfspace.isStatic = true;
+    halfspace.position = { 500, 700 };
+    simulation.add(&halfspace);
 
     while (!WindowShouldClose())
     {
