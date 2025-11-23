@@ -1,360 +1,417 @@
-/*
-This project uses the Raylib framework to provide us functionality for math, graphics, GUI, input etc.
-See documentation here: https://www.raylib.com/, and examples here: https://www.raylib.com/examples.html
-*/
-
 #include "raylib.h"
 #include "raymath.h"
-#define RAYGUI_IMPLEMENTATION
-#include "raygui.h"
-#include "game.h"
 #include <vector>
-#include <iostream>
+#include <cassert>
 
-Vector2 screenSize = { 800, 800 };
-
-float dt = 0.0f;
-
-enum PhysicsShape {
-    CIRCLE,
-    RECTANGLE,
-    HALF_SPACE
+enum ColliderType
+{
+    COLLIDER_TYPE_INVALID,
+    COLLIDER_TYPE_CIRCLE,
+    COLLIDER_TYPE_HALF_SPACE
+    //COLLDER_BOX <-- not implemented yet
 };
 
-class PhysicsBody 
+union Collider
 {
-public:
-    bool isStatic;
-    Vector2 velocity;
-    Vector2 position;
-    float drag;
-    float mass;
-    Color color;
+    struct
+    {
+        float radius;
+    } circle;
 
-    PhysicsBody(Vector2 vel, Vector2 pos, float d, float m, Color c, bool s) : velocity(vel), position(pos), drag(d), mass(m), color(c), isStatic(s) {}
-    PhysicsBody(Vector2 vel, Vector2 pos, float d, float m, bool s) : velocity(vel), position(pos), drag(d), mass(m), isStatic(s) { color = BLACK; }
+    struct
+    {
+        Vector2 normal;
+    } half_space;
 
-    virtual void draw() { return; }
-
-    virtual PhysicsShape Shape() = 0;
+    struct
+    {
+        Vector2 extents;
+    } box;
 };
 
-class PhysicsRectangle : public PhysicsBody 
+struct PhysicsBody
 {
-public:
-    Vector2 size;
+    Vector2 position = Vector2Zeros;
+    Vector2 velocity = Vector2Zeros;
+    Vector2 net_force = Vector2Zeros;
 
-    PhysicsRectangle(Vector2 vel, Vector2 pos, float d, float m, Color c, Vector2 si, bool s) : PhysicsBody(vel, pos, d, m, c, s) { size = si; };
+    float drag = 1.0f;
+    float inv_mass = 1.0f;
+    float gravity_scale = 1.0f;
 
-    void draw() override
-    {
-        DrawRectangle(position.x, position.y, size.x, size.y, color);
-    }
+    float friction_coeff = 1.0f;        // How easily an object moves along a surface --> 0 = easy, 1 = hard
+    float restitution_coeff = 1.0f;     // "Bounciness" --> how much energy is lost on-collision (0 = all energy lost, 1 = no energy lost)
 
-    PhysicsShape Shape() override { return RECTANGLE; };
+    ColliderType collider_type = COLLIDER_TYPE_INVALID;
+    Collider collider{};
+    bool collision = false;
+    //Color color = MAGENTA;// Now colored based on collision status
 };
 
-class PhysicsCircle : public PhysicsBody
+struct HitPair
 {
-public:
-    float radius;
-    
-    PhysicsCircle(Vector2 vel, Vector2 pos, float d, float m, Color c, float r, bool s) : PhysicsBody(vel, pos, d, m, c, s) { radius = r; };
-
-    void draw() override
-    {
-        DrawCircle(position.x, position.y, radius, color);
-    }
-
-    PhysicsShape Shape() override { return CIRCLE; };
+    //int a = -1;
+    //int b = -1;
+    PhysicsBody* a = nullptr;
+    PhysicsBody* b = nullptr;
+    Vector2 mtv = Vector2Zeros;
 };
 
-
-class PhysicsHalfspace : public PhysicsBody
+// Physics Simulation
+struct PhysicsWorld
 {
-private:
-    float rotation = 0;
-    Vector2 normal = { 0, -1 };
-
-public:
-    PhysicsHalfspace(Vector2 vel, Vector2 pos, float d, float m, Color c, bool s, float rot, Vector2 nor) : PhysicsBody(vel, pos, d, m, c, s) { rotation = rot, normal = nor; };
-
-    void setRotationDegrees(float rotationInDegrees)
-    {
-        rotation = rotationInDegrees;
-        normal = Vector2Rotate({ 0, -1 }, rotation * DEG2RAD);
-    }
-
-    float getRotation() { return rotation; }
-
-    Vector2 getNormal() { return normal; }
-
-    void draw() override
-    {
-        //Draw arbitrary point on the line
-        DrawCircle(position.x, position.y, 8, color);
-
-        //Draw normal vector, perpendicular to the surface
-        DrawLineEx(position, position + normal * 30, 1, color);
-
-        //Draw the line/surface
-        //Rotate function takes radians. 360 degrees = 2PI radians 
-        Vector2 parallelToSurface = Vector2Rotate(normal, PI * 0.5f);
-        DrawLineEx(position - parallelToSurface * 4000, position + parallelToSurface * 4000, 1, color);
-    }
-
-    PhysicsShape Shape() override { return HALF_SPACE; }
-};
-
-bool CircleCircleOverlap(PhysicsCircle* circleA, PhysicsCircle* circleB) {
-    Vector2 displacement = circleB->position - circleA->position;
-    float distance = Vector2Length(displacement);
-    float overlap = circleA->radius + circleB->radius - distance;
-    if (overlap >= 0) 
-    {
-        Vector2 normalAtoB;
-        
-        if (abs(distance) < 0.0001f) { normalAtoB = { 0, 1 }; }
-        else { normalAtoB = displacement / distance; }
-
-        Vector2 mtv = normalAtoB * overlap;
-
-        circleA->position -= mtv * 0.5f;
-        circleB->position += mtv * 0.5f;
-
-        return true; 
-    }
-    else { return false; }
-}
-
-bool CircleHalfspaceOverlap(PhysicsCircle* circle, PhysicsHalfspace* halfspace)
-{
-    Vector2 displacementToCircle = circle->position - halfspace->position;
-
-    float dot = Vector2DotProduct(displacementToCircle, halfspace->getNormal());
-    Vector2 projectionDisplacementOntoNormal = halfspace->getNormal() * dot;
-
-    DrawLineEx(circle->position, circle->position - projectionDisplacementOntoNormal, 1, GRAY);
-    Vector2 midpoint = circle->position - projectionDisplacementOntoNormal * 0.5f;
-    DrawText(TextFormat("D: %6.0f", dot), midpoint.x, midpoint.y, 30, GRAY);
-
-    float overlap = dot < circle->radius;
-
-    if (overlap > 0)
-    {
-        Vector2 mtv = halfspace->getNormal() * overlap;
-        circle->position += mtv;
-    }
-
-    return overlap;
-}
-
-bool CircleOffTop(PhysicsCircle* circle) {
-    if (circle->position.y <= 0 + circle->radius) { return true; }
-    else { return false; }
-}
-
-bool CircleOffSide(PhysicsCircle* circle) {
-    if (circle->position.x >= screenSize.x - circle->radius || circle->position.x <= 0 + circle->radius) { return true; }
-    else { return false; }
-}
-
-bool CircleOffBottom(PhysicsCircle* circle) {
-    if (circle->position.y >= screenSize.y - circle->radius) { return true; }
-    else { return false; }
-}
-
-class PhysicsSimulation
-{
-public:
     Vector2 gravity = { 0.0f, 9.81f };
-
-    std::vector<PhysicsBody*> bodies;
-
-    void add(PhysicsBody* newBody) {
-        bodies.push_back(newBody);
-    }
-
-    void check_collisions(size_t index) {
-        PhysicsBody* bodyPointerA = bodies[index];
-        PhysicsShape shapeOfA = bodyPointerA->Shape();
-        bodyPointerA->color = GREEN;
-            
-        for (size_t j = 0; j < bodies.size(); j++) {
-            if (j != index) {
-                PhysicsBody* bodyPointerB = bodies[j];
-                PhysicsShape shapeOfB = bodyPointerB->Shape();
-                PhysicsCircle* birdPointerB = (PhysicsCircle*)bodyPointerB;
-
-                bool didOverlap = false;
-                if (shapeOfA == CIRCLE && shapeOfB == CIRCLE) {  didOverlap = CircleCircleOverlap((PhysicsCircle*)bodyPointerA, (PhysicsCircle*)bodyPointerB); }
-                else if (shapeOfA == CIRCLE && shapeOfB == HALF_SPACE) { didOverlap = CircleHalfspaceOverlap((PhysicsCircle*)bodyPointerA, (PhysicsHalfspace*)bodyPointerB); }
-                else if (shapeOfA == HALF_SPACE && shapeOfB == CIRCLE) { didOverlap = CircleHalfspaceOverlap((PhysicsCircle*)bodyPointerB, (PhysicsHalfspace*)bodyPointerA); }
-
-                if (didOverlap) { bodyPointerA->color = RED; }
-            }
-        }
-    }
-
-    void simulate_body(size_t index) {
-        PhysicsBody* b = bodies[index];
-
-        if (!b->isStatic)
-        {
-            b->velocity += gravity * dt * 2.5f;
-            b->position += b->velocity * dt * 2.5f;
-
-            if (dynamic_cast<PhysicsCircle*>(b) != nullptr)
-            {
-                PhysicsCircle* birdPointer = (PhysicsCircle*)b;
-                if (CircleOffBottom(birdPointer))
-                {
-                    // Making it appear as if the bird gradually slows down upon landing
-                    birdPointer->position.y = screenSize.y - birdPointer->radius;
-                    birdPointer->velocity.x -= birdPointer->velocity.x / birdPointer->drag * dt;
-                }
-
-                // Bouncing the bird if it hits the top of the screen or either side of the screen
-                if (CircleOffSide(birdPointer)) { birdPointer->velocity.x *= -1; }
-                if (CircleOffTop(birdPointer)) { birdPointer->velocity.y *= -1; }
-            }
-        }
-
-        check_collisions(index);
-    }
-
-    void simulate_world() {
-        for (size_t i = 0; i < bodies.size(); i++) {
-            simulate_body(i);
-        }
-    }
-
-    void draw_world() {
-        for (size_t i = 0; i < bodies.size(); i++) {
-            bodies[i]->draw();
-        }
-    }
+    std::vector<PhysicsBody> entities;
 };
 
-Rectangle platform = { 0.0f, 450.0f, 125.0f, 20.0f };
-
-float timeHeldW, timeHeldS = 1.0f;
-
-float birdRadius = 10.0f;
-
-float launchSpeed = 100.0f;
-float launchAngle = 0.0f;
-Vector2 launchPosition = { platform.x + platform.width - birdRadius, platform.y - (platform.height - birdRadius) };
-Vector2 launchVelocity = Vector2Rotate(Vector2UnitX, launchAngle) * launchSpeed;
-
-PhysicsCircle bird(launchVelocity, launchPosition, 0.93f, 0.0f, GREEN, birdRadius, false);
-
-PhysicsHalfspace halfspace({ 0, 0 }, { 0, 0 }, 1, 1, ORANGE, true, 0, { 0, -1 });
-PhysicsSimulation simulation;
-
-void update()
+// MTV points FROM 2 TO 1
+bool CircleCircle(Vector2 pos1, float rad1, Vector2 pos2, float rad2, Vector2* mtv = nullptr)
 {
-    dt = GetFrameTime();
+    float radii_sum = rad1 + rad2;
+    float distance = Vector2Distance(pos1, pos2);
+    bool collision = distance <= radii_sum;
 
-    launchVelocity = Vector2Rotate(Vector2UnitX, launchAngle) * launchSpeed;
-
-    simulation.simulate_world();
-
-    if (IsKeyPressed(KEY_SPACE))
+    // AB = B - A
+    // 21 = 1 - 2
+    if (collision && mtv != nullptr)
     {
-        bird.velocity = launchVelocity;
-        bird.position = launchPosition;
-        //PhysicsCircle* newBird = new PhysicsCircle(launchVelocity, launchPosition, 0.93f, 0.0, birdRadius, GREEN);
-        PhysicsCircle* newBird = new PhysicsCircle(bird);
-        newBird->radius = rand() % 10 + 10;
-
-        simulation.add(newBird);
+        float mtv_magnitude = radii_sum - distance;
+        Vector2 mtv_direction = Vector2Normalize(pos1 - pos2);
+        *mtv = mtv_direction * mtv_magnitude;
     }
 
-    // Input for increasing/decreasing bird.drag (1/2)
-    if (IsKeyDown(KEY_ONE)) { bird.drag += 0.1f * dt; }
-    if (IsKeyDown(KEY_TWO)) { bird.drag -= 0.1f * dt; }
-
-    // Input for moving the start around (arrow keys)
-    if (IsKeyDown(KEY_LEFT))  { launchPosition.x -= 75.0f * dt; }
-    if (IsKeyDown(KEY_RIGHT)) { launchPosition.x += 75.0f * dt; }
-    if (IsKeyDown(KEY_UP))    { launchPosition.y -= 75.0f * dt; }
-    if (IsKeyDown(KEY_DOWN))  { launchPosition.y += 75.0f * dt; }
-
-    // Input for altering the launch angle (WASD)
-    if (IsKeyDown(KEY_A)) { launchAngle -= 50.0f * DEG2RAD * dt; }
-    if (IsKeyDown(KEY_D)) { launchAngle += 50.0f * DEG2RAD * dt; }
-    if (IsKeyDown(KEY_W)) 
-    {
-        launchSpeed += 125.0f * timeHeldW * dt;
-        timeHeldW += dt;
-    }
-    else { timeHeldW = 1.0f; }
-    if (IsKeyDown(KEY_S)) 
-    {
-        launchSpeed -= 125.0f * timeHeldS * dt;
-        timeHeldS += dt;
-    }
-    else { timeHeldS = 1.0f; }
-
-    // Input for altering gravity strength and angle (IJKL)?
-
-    if (IsKeyDown(KEY_I)) { simulation.gravity += simulation.gravity * 1.05f * dt; }
-    if (IsKeyDown(KEY_K)) { simulation.gravity -= simulation.gravity * 1.05f * dt; }
-    if (IsKeyDown(KEY_J)) { simulation.gravity = Vector2Rotate(simulation.gravity, (-45.0f * DEG2RAD * dt)); }
-    if (IsKeyDown(KEY_L)) { simulation.gravity = Vector2Rotate(simulation.gravity, (45.0f * DEG2RAD * dt)); }
+    return collision;
 }
 
-void draw()
+// MTV points FROM half-space TO circle
+bool CircleHalfSpace(Vector2 pos_circle, float rad, Vector2 pos_half_space, Vector2 normal, Vector2* mtv = nullptr)
 {
-    BeginDrawing();
-    ClearBackground(WHITE);
+    Vector2 to_circle = pos_circle - pos_half_space;
+    float proj = Vector2DotProduct(to_circle, normal);
+    bool collision = proj <= rad;
 
-    // Where our bird should launch from when we press space
-    DrawCircleV(launchPosition, bird.radius, ORANGE);
+    if (collision && mtv != nullptr)
+    {
+        float mtv_magnitude = rad - proj;
+        Vector2 mtv_direction = normal;
+        *mtv = mtv_direction * mtv_magnitude;
+    }
 
-    // All of our birds current position(s)
-    simulation.draw_world();
+    return collision;
+}
 
-    // Ground at the bottom of the screen, and a platform 3/4's the way down the screen
-    DrawRectangleRec(platform, BLACK);
+void UpdateMotion(PhysicsWorld& world);
+std::vector<HitPair> DetectCollisions(PhysicsWorld& world);
+void ValidateResolutionVectors(std::vector<HitPair>& collisions);
+void ResolveCollisions(std::vector<HitPair> collisions);
 
-    // Show the result of user-defined launch-angle * launch-speed
-    DrawLineEx(launchPosition, launchPosition + launchVelocity, 2.0f, RED);
-    DrawLineEx(screenSize/2, (screenSize/2)+simulation.gravity, 2.0f, DARKGREEN);
+void Update(PhysicsWorld& world);
+void Draw(const PhysicsWorld& world);
+void DrawForces(std::vector<HitPair> collisions, Vector2 gravity);
 
-    // Labels for user-defined launch values
-    DrawText(TextFormat("Launch Position: %f %f", launchPosition.x, launchPosition.y), 10, 10, 20, LIME);
-    DrawText(TextFormat("Launch Angle: %f", launchAngle * RAD2DEG), 10, 40, 20, ORANGE);
-    DrawText(TextFormat("Launch Speed: %f ", launchSpeed), 10, 70, 20, DARKGREEN);
-    DrawText(TextFormat("Bird Velocity: %f %f", bird.velocity.x, bird.velocity.y), 10, 100, 20, GOLD);
-    DrawText(TextFormat("Bird Drag: %f", bird.drag), 10, 130, 20, VIOLET);
-    DrawText(TextFormat("Gravity: %f %f", simulation.gravity.x, simulation.gravity.y), 10, 160, 20, VIOLET);
+void DrawProjCircleHalfSpace(Vector2 pos_circle, float rad, Vector2 pos_half_space, Vector2 normal);
 
-    //Controls for halfspace
-    GuiSliderBar(Rectangle{ 20, 200, 240, 30 }, "X", TextFormat("%.0f", halfspace.position.x), &halfspace.position.x, 0, GetScreenWidth());
-    GuiSliderBar(Rectangle{ screenSize.x/3+20, 200, 240, 30 }, "Y", TextFormat("%.0f", halfspace.position.y), &halfspace.position.y, 0, GetScreenHeight());
-
-    float halfspaceRotation = halfspace.getRotation();
-    GuiSliderBar(Rectangle{ screenSize.x/3*2+20, 200, 200, 30 }, "Rotation", TextFormat("%.0f", halfspace.getRotation()), &halfspaceRotation, -360, 360);
-    halfspace.setRotationDegrees(halfspaceRotation);
-
-    EndDrawing();
+// Inverse-Mass of 0.0 means "infinitely heavy" --> 1.0f / 0.0f --> "infinity" for our purposes
+bool IsMassInfinite(const PhysicsBody& entity)
+{
+    return entity.inv_mass <= FLT_EPSILON;
 }
 
 int main()
 {
-    InitWindow(screenSize.x, screenSize.y, "Physics-1");
-    halfspace.isStatic = true;
-    halfspace.position = { 500, 700 };
-    simulation.add(&halfspace);
+    // Lab Exercise 6 TODO -- Set up entities based on lab document
+    PhysicsWorld world;
+    {
+        // Entity should only exist within this scope to avoid dangling pointers if world.entities is resized during game-loop
+        PhysicsBody* entity = nullptr;
 
+        Vector2 test_force = Vector2UnitY * -1000.0f;
+
+        // Static half-space
+        world.entities.push_back({});
+        entity = &world.entities.back();
+        entity->position = { 400.0f, 600.0f };
+        entity->gravity_scale = 0.0f;
+        entity->collider_type = COLLIDER_TYPE_HALF_SPACE;
+        entity->collider.half_space.normal = Vector2Rotate(Vector2UnitX, -45.0f * DEG2RAD);
+        entity->inv_mass = 0.0f;
+
+        // Static circle
+        world.entities.push_back({});
+        entity = &world.entities.back();
+        entity->position = { 400.0f, 500.0f };
+        entity->gravity_scale = 0.0f;
+        entity->collider_type = COLLIDER_TYPE_CIRCLE;
+        entity->collider.circle.radius = 20.0f;
+        entity->inv_mass = 0.0f;
+
+        // Light circle (mass = 1 kg)
+        world.entities.push_back({});
+        entity = &world.entities.back();
+        entity->position = { 375.0f, 400.0f };
+        entity->gravity_scale = 1.0f;
+        entity->collider_type = COLLIDER_TYPE_CIRCLE;
+        entity->collider.circle.radius = 20.0f;
+        entity->inv_mass = 1.0f / 1.0f;
+        entity->net_force += test_force;
+
+        // Heavy circle (mass = 100 kg)
+        world.entities.push_back({});
+        entity = &world.entities.back();
+        entity->position = { 425.0f, 400.0f };
+        entity->gravity_scale = 1.0f;
+        entity->collider_type = COLLIDER_TYPE_CIRCLE;
+        entity->collider.circle.radius = 20.0f;
+        entity->inv_mass = 1.0f / 100.0f;
+        entity->net_force += test_force;
+    }
+
+    // Ensure all half-space's have infinite mass (good habit to validate your entities after creation but before physics-loop)
+    for (const PhysicsBody& e : world.entities)
+    {
+        if (e.collider_type == COLLIDER_TYPE_HALF_SPACE)
+        {
+            assert(IsMassInfinite(e));
+        }
+    }
+
+    // Delta-time is 0 on the frame 1, which will zero any forces applied before frame 1 (fix by skipping frame 1)
+    bool is_first_frame = true;
+    InitWindow(800, 800, "Physics-1");
+    SetTargetFPS(60);
     while (!WindowShouldClose())
     {
-        update();
-        draw();
+        if (!is_first_frame)
+            Update(world);
+        else
+            is_first_frame = false;
+
+        BeginDrawing();
+            ClearBackground(WHITE);
+            Draw(world);
+
+            // Less efficient re-calculating collisions during render loop, but its easier than hard-coding a test-case ;)
+            std::vector<HitPair> collisions = DetectCollisions(world);
+            ValidateResolutionVectors(collisions);
+            DrawForces(collisions, world.gravity);
+
+        EndDrawing();
     }
 
     CloseWindow();
     return 0;
+}
+
+void DrawProjCircleHalfSpace(Vector2 pos_circle, float rad, Vector2 pos_half_space, Vector2 normal)
+{
+    Vector2 to_circle = pos_circle - pos_half_space;
+    float proj = Vector2DotProduct(to_circle, normal);
+
+    // TODO -- customize line thickness and colours *if necessary*
+    DrawLineEx(pos_half_space, pos_half_space + to_circle, 5.0f, MAGENTA);
+    DrawCircleV(pos_half_space + normal * proj, rad, PINK);
+    DrawLineEx(pos_half_space, pos_half_space + normal * proj, 4.0f, PINK);
+}
+
+// Motion loop
+void UpdateMotion(PhysicsWorld& world)
+{
+    float dt = GetFrameTime();
+
+    for (size_t i = 0; i < world.entities.size(); i++)
+    {
+        PhysicsBody& e = world.entities[i];
+
+        // F = ma
+        // a = F / m        --> possible divide-by-zero error
+        // a = F * (1 / m)  --> prevent by multiplying by inverse-mass
+        Vector2 acc = e.net_force * e.inv_mass;
+
+        // Acceleration due to gravity is always 9.81 (independent of mass)
+        acc += world.gravity * e.gravity_scale;
+
+        e.velocity += acc * dt;             // v = a * t
+        e.position += e.velocity * dt;      // p = v * t
+
+        // Reset net force and collision render status
+        e.net_force = Vector2Zeros;
+        e.collision = false;
+    }
+}
+
+// Collision loop (Test every object against all other objects)
+std::vector<HitPair> DetectCollisions(PhysicsWorld& world)
+{
+    std::vector<HitPair> collisions;
+
+    for (size_t i = 0; i < world.entities.size(); i++)
+    {
+        for (size_t j = i + 1; j < world.entities.size(); j++)
+        {
+            PhysicsBody& a = world.entities[i];
+            PhysicsBody& b = world.entities[j];
+            assert(a.collider_type != COLLIDER_TYPE_INVALID && b.collider_type != COLLIDER_TYPE_INVALID);
+            bool collision = false;
+            Vector2 mtv = Vector2Zeros;
+
+            if (a.collider_type == COLLIDER_TYPE_CIRCLE &&
+                b.collider_type == COLLIDER_TYPE_CIRCLE)
+            {
+                collision = CircleCircle(
+                    a.position, a.collider.circle.radius,
+                    b.position, b.collider.circle.radius,
+                    &mtv);
+            }
+            else if (
+                a.collider_type == COLLIDER_TYPE_CIRCLE &&
+                b.collider_type == COLLIDER_TYPE_HALF_SPACE)
+            {
+                collision = CircleHalfSpace(
+                    a.position, a.collider.circle.radius,
+                    b.position, b.collider.half_space.normal,
+                    &mtv);
+            }
+            else if (
+                a.collider_type == COLLIDER_TYPE_HALF_SPACE &&
+                b.collider_type == COLLIDER_TYPE_CIRCLE)
+            {
+                collision = CircleHalfSpace(
+                    b.position, b.collider.circle.radius,
+                    a.position, a.collider.half_space.normal,
+                    &mtv);
+            }
+
+            a.collision |= collision;
+            b.collision |= collision;
+
+            if (collision)
+            {
+                HitPair collision;
+                collision.a = &a;
+                collision.b = &b;
+                collision.mtv = mtv;
+                collisions.push_back(collision);
+            }
+        }
+    }
+
+    return collisions;
+}
+
+void ValidateResolutionVectors(std::vector<HitPair>& collisions)
+{
+    for (HitPair& collision : collisions)
+    {
+        PhysicsBody*& a = collision.a;
+        PhysicsBody*& b = collision.b;
+        Vector2& mtv = collision.mtv;
+
+        // Ensure at least one entity can move (otherwise we shouldn't be resolving collision)
+        assert(!(IsMassInfinite(*a) && IsMassInfinite(*b)));
+
+        // Ensure entity A is *ALWAYS* dynamic, and entity B is either static or dynamic
+        if (IsMassInfinite(*a))
+        {
+            // Swap A and B if A is static
+            PhysicsBody* temp = b;
+            b = a;
+            a = temp;
+        }
+
+        // Ensure that mtv points FROM B TO A
+        Vector2 direction_BA = Vector2Normalize(a->position - b->position);
+        float dot = Vector2DotProduct(direction_BA, collision.mtv);
+        if (dot < 0.0f)
+        {
+            mtv *= -1.0f;
+        }
+    }
+}
+
+void ResolveCollisions(std::vector<HitPair> collisions)
+{
+    for (HitPair collision : collisions)
+    {
+        PhysicsBody& a = *collision.a;
+        PhysicsBody& b = *collision.b;
+        Vector2 mtv = collision.mtv;
+
+        if (IsMassInfinite(b))
+        {
+            a.position += mtv;
+        }
+        else
+        {
+            a.position += mtv * 0.5f;
+            b.position -= mtv * 0.5f;
+        }
+    }
+}
+
+void Update(PhysicsWorld& world)
+{
+    UpdateMotion(world);
+    std::vector<HitPair> collisions = DetectCollisions(world);
+    ValidateResolutionVectors(collisions);
+    ResolveCollisions(collisions);
+}
+
+void Draw(const PhysicsWorld& world)
+{
+    for (const PhysicsBody& e : world.entities)
+    {
+        Color color = e.collision ? RED : GREEN;
+        if (e.collider_type == COLLIDER_TYPE_CIRCLE)
+        {
+            DrawCircleV(e.position, e.collider.circle.radius, color);
+        }
+        else if (e.collider_type == COLLIDER_TYPE_HALF_SPACE)
+        {
+            // "Flip" the normal to determine the direction of the half-space
+            Vector2 direction = { -e.collider.half_space.normal.y, e.collider.half_space.normal.x };
+            Vector2 p0 = e.position + direction * 1000.0f;
+            Vector2 p1 = e.position - direction * 1000.0f;
+            DrawLineEx(p0, p1, 5.0f, color);
+            DrawLineEx(e.position, e.position + e.collider.half_space.normal * 50.0f, 5.0f, GOLD);
+        }
+    }
+
+    // Removed hard-coded test to free us of our entity-order constraint!
+    //DrawProjCircleHalfSpace(
+    //    world.entities[2].position, world.entities[2].collider.circle.radius,
+    //    world.entities[1].position, world.entities[1].collider.half_space.normal);
+}
+
+void DrawForces(std::vector<HitPair> collisions, Vector2 gravity)
+{
+    for (HitPair collision : collisions)
+    {
+        PhysicsBody& a = *collision.a;
+        PhysicsBody& b = *collision.b;
+
+        if (a.collider_type == COLLIDER_TYPE_CIRCLE && b.collider_type == COLLIDER_TYPE_HALF_SPACE)
+        {
+            // Stop circle once it touches the half-space so we can visualize forces
+            a.gravity_scale = 0.0f;
+            a.velocity = Vector2Zeros;
+
+            // Lab Exercise 6 TODO -- correct the friction direction by doing the following:
+            // Read pages 386-392 of the Game Physics Cookbook (by Gabor Szauer)
+            // It explains how to properly calculate the friction direction.
+            // Use the textbook's formula to correct force_normal and force_friction
+
+            float magnitude = gravity.y / a.inv_mass;
+            Vector2 force_gravity = Vector2Normalize(gravity) * magnitude;
+            Vector2 force_normal = b.collider.half_space.normal * magnitude;
+
+            // This friction force "just happens" to be in the right direction.
+            // The textbook's formula is much more involved than this!
+            Vector2 force_friction = { force_normal.y, -force_normal.x };
+            force_friction *= a.friction_coeff;
+
+            DrawLineEx(a.position, a.position + force_gravity, 4.0f, PURPLE);
+            DrawLineEx(a.position, a.position + force_normal, 4.0f, GREEN);
+            DrawLineEx(a.position, a.position + force_friction, 4.0f, YELLOW);
+        }
+    }
 }
