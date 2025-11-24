@@ -1,5 +1,7 @@
 #include "raylib.h"
 #include "raymath.h"
+#define RAYGUI_IMPLEMENTATION
+#include "raygui.h"
 #include <vector>
 #include <cassert>
 
@@ -21,6 +23,12 @@ union Collider
     struct
     {
         Vector2 normal;
+        float rotation;
+        float getRotation() { return rotation; }
+        void setRotation(float rot) {
+            rotation = rot;
+            normal = Vector2Rotate(Vector2UnitX, rotation * DEG2RAD);
+        }
     } half_space;
 
     struct
@@ -45,7 +53,7 @@ struct PhysicsBody
     ColliderType collider_type = COLLIDER_TYPE_INVALID;
     Collider collider{};
     bool collision = false;
-    //Color color = MAGENTA;// Now colored based on collision status
+    Color color = MAGENTA;
 };
 
 struct HitPair
@@ -119,10 +127,8 @@ bool IsMassInfinite(const PhysicsBody& entity)
 
 int main()
 {
-    // Lab Exercise 6 TODO -- Set up entities based on lab document
     PhysicsWorld world;
     {
-        // Entity should only exist within this scope to avoid dangling pointers if world.entities is resized during game-loop
         PhysicsBody* entity = nullptr;
 
         Vector2 test_force = Vector2UnitY * -1000.0f;
@@ -137,33 +143,57 @@ int main()
         entity->inv_mass = 0.0f;
 
         // Static circle
-        world.entities.push_back({});
-        entity = &world.entities.back();
-        entity->position = { 400.0f, 500.0f };
-        entity->gravity_scale = 0.0f;
-        entity->collider_type = COLLIDER_TYPE_CIRCLE;
-        entity->collider.circle.radius = 20.0f;
-        entity->inv_mass = 0.0f;
+        //world.entities.push_back({});
+        //entity = &world.entities.back();
+        //entity->position = { 400.0f, 500.0f };
+        //entity->gravity_scale = 0.0f;
+        //entity->collider_type = COLLIDER_TYPE_CIRCLE;
+        //entity->collider.circle.radius = 20.0f;
+        //entity->inv_mass = 0.0f;
 
-        // Light circle (mass = 1 kg)
         world.entities.push_back({});
         entity = &world.entities.back();
-        entity->position = { 375.0f, 400.0f };
+        entity->position = { 100.0f, 100.0f };
         entity->gravity_scale = 1.0f;
         entity->collider_type = COLLIDER_TYPE_CIRCLE;
         entity->collider.circle.radius = 20.0f;
-        entity->inv_mass = 1.0f / 1.0f;
+        entity->inv_mass = 1.0f / 2.0f;
         entity->net_force += test_force;
+        entity->friction_coeff = 0.1f;
+        entity->color = ORANGE;
 
-        // Heavy circle (mass = 100 kg)
         world.entities.push_back({});
         entity = &world.entities.back();
-        entity->position = { 425.0f, 400.0f };
+        entity->position = { 300.0f, 100.0f };
         entity->gravity_scale = 1.0f;
         entity->collider_type = COLLIDER_TYPE_CIRCLE;
         entity->collider.circle.radius = 20.0f;
-        entity->inv_mass = 1.0f / 100.0f;
+        entity->inv_mass = 1.0f / 2.0f;
         entity->net_force += test_force;
+        entity->friction_coeff = 0.8f;
+        entity->color = GREEN;
+
+        world.entities.push_back({});
+        entity = &world.entities.back();
+        entity->position = { 500.0f, 100.0f };
+        entity->gravity_scale = 1.0f;
+        entity->collider_type = COLLIDER_TYPE_CIRCLE;
+        entity->collider.circle.radius = 20.0f;
+        entity->inv_mass = 1.0f / 8.0f;
+        entity->net_force += test_force;
+        entity->friction_coeff = 0.1f;
+        entity->color = BLUE;
+
+        world.entities.push_back({});
+        entity = &world.entities.back();
+        entity->position = { 700.0f, 100.0f };
+        entity->gravity_scale = 8.0f;
+        entity->collider_type = COLLIDER_TYPE_CIRCLE;
+        entity->collider.circle.radius = 20.0f;
+        entity->inv_mass = 1.0f / 8.0f;
+        entity->net_force += test_force;
+        entity->friction_coeff = 0.8f;
+        entity->color = YELLOW;
     }
 
     // Ensure all half-space's have infinite mass (good habit to validate your entities after creation but before physics-loop)
@@ -188,6 +218,30 @@ int main()
 
         BeginDrawing();
             ClearBackground(WHITE);
+
+            float i = 1;
+
+            for (PhysicsBody& e : world.entities)
+            {
+                if (e.collider_type == COLLIDER_TYPE_HALF_SPACE)
+                {
+                    float halfspace_rotation = e.collider.half_space.getRotation();
+                    GuiSliderBar(Rectangle{ 120, 240, 540, 45 }, "Halfspace Rotation", TextFormat("%.0f", e.collider.half_space.getRotation()), &halfspace_rotation, -120, -45);
+                    e.collider.half_space.setRotation(halfspace_rotation);
+                }
+                if (e.collider_type == COLLIDER_TYPE_CIRCLE)
+                {
+                    float coeff = e.friction_coeff;
+                    GuiSliderBar(Rectangle{ 80 + (180 * (i-1)), 40, 100, 60 }, TextFormat("%i Coeff", int(i)), TextFormat("%.0f", e.friction_coeff), &coeff, 0, 2);
+                    e.friction_coeff = coeff;
+                    float mass = 1.0f / e.inv_mass;
+                    GuiSliderBar(Rectangle{ 80 + (180 * (i-1)), 160, 100, 60 }, TextFormat("%i Mass", int(i)), TextFormat("%.0f", mass), &mass, 0.1, 20);
+                    e.inv_mass = 1.0f / mass;
+
+                    i = i + 1.0f;
+                }
+            }
+
             Draw(world);
 
             // Less efficient re-calculating collisions during render loop, but its easier than hard-coding a test-case ;)
@@ -360,10 +414,16 @@ void Draw(const PhysicsWorld& world)
 {
     for (const PhysicsBody& e : world.entities)
     {
-        Color color = e.collision ? RED : GREEN;
+        Color color = e.color;
         if (e.collider_type == COLLIDER_TYPE_CIRCLE)
         {
             DrawCircleV(e.position, e.collider.circle.radius, color);
+
+            float magnitude = world.gravity.y / e.inv_mass;
+            Vector2 force_gravity = Vector2Normalize(world.gravity) * magnitude;
+
+            DrawLineEx(e.position, e.position + force_gravity, 2.0f, PURPLE);
+            DrawLineEx(e.position, e.position + e.velocity, 2.0f, RED);
         }
         else if (e.collider_type == COLLIDER_TYPE_HALF_SPACE)
         {
@@ -392,8 +452,8 @@ void DrawForces(std::vector<HitPair> collisions, Vector2 gravity)
         if (a.collider_type == COLLIDER_TYPE_CIRCLE && b.collider_type == COLLIDER_TYPE_HALF_SPACE)
         {
             // Stop circle once it touches the half-space so we can visualize forces
-            a.gravity_scale = 0.0f;
-            a.velocity = Vector2Zeros;
+            //a.gravity_scale = 0.0f;
+            //a.velocity = Vector2Zeros;
 
             // Lab Exercise 6 TODO -- correct the friction direction by doing the following:
             // Read pages 386-392 of the Game Physics Cookbook (by Gabor Szauer)
@@ -402,16 +462,21 @@ void DrawForces(std::vector<HitPair> collisions, Vector2 gravity)
 
             float magnitude = gravity.y / a.inv_mass;
             Vector2 force_gravity = Vector2Normalize(gravity) * magnitude;
-            Vector2 force_normal = b.collider.half_space.normal * magnitude;
+            //Vector2 force_normal = b.collider.half_space.normal * magnitude;
+
+            Vector2 fg_perp = b.collider.half_space.normal * Vector2DotProduct(force_gravity, b.collider.half_space.normal);
+            Vector2 force_normal = fg_perp * -1;
+
+            Vector2 fg_para = force_gravity - fg_perp;
+            Vector2 force_friction = fg_para * -1;
 
             // This friction force "just happens" to be in the right direction.
             // The textbook's formula is much more involved than this!
-            Vector2 force_friction = { force_normal.y, -force_normal.x };
-            force_friction *= a.friction_coeff;
+            //Vector2 force_friction = { force_normal.y, -force_normal.x };
+            //force_friction *= a.friction_coeff;
 
-            DrawLineEx(a.position, a.position + force_gravity, 4.0f, PURPLE);
-            DrawLineEx(a.position, a.position + force_normal, 4.0f, GREEN);
-            DrawLineEx(a.position, a.position + force_friction, 4.0f, YELLOW);
+            DrawLineEx(a.position, a.position + force_normal, 2.0f, GREEN);
+            DrawLineEx(a.position, a.position + force_friction, 2.0f, ORANGE);
         }
     }
 }
