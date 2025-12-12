@@ -22,7 +22,6 @@ int main()
     const Vector2 slingshot_position = { 110.0f, 575.0f };
     Vector2 bird_position = slingshot_position;
     SlingshotState slingshot_state = SLING_IDLE;
-    bool birdIsCircle = true;
 
     InitWindow(800, 800, "Physics-1");
     SetTargetFPS(60);
@@ -37,8 +36,6 @@ int main()
 
             if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) && CheckCollisionPointCircle(mouse_position, slingshot_position, slingshot_radius))
                 slingshot_state = SLING_DRAG;
-            if (IsKeyPressed(KEY_ONE)) { birdIsCircle = true; }
-            if (IsKeyPressed(KEY_TWO)) { birdIsCircle = false; }
 
             if (slingshot_state == SLING_DRAG)
             {
@@ -57,15 +54,8 @@ int main()
 
                     bird.velocity = Vector2Rotate(Vector2UnitX, launchAngle) * launchSpeed;
                     bird.gravity_scale = 20.0f;
-                    bird.toughness = 75.0f;
-                    if (birdIsCircle) {
-                        bird.collider_type = COLLIDER_TYPE_CIRCLE;
-                        bird.collider.circle.radius = 10.0f;
-                    }
-                    else {
-                        bird.collider_type = COLLIDER_TYPE_BOX;
-                        bird.collider.box.extents = { 10.0f, 10.0f };
-                    }
+                    bird.collider_type = COLLIDER_TYPE_BOX;
+                    bird.collider.box.extents = { 10.0f, 10.0f };
                     world.entities.push_back(bird);
 
                     slingshot_state = SLING_IDLE;

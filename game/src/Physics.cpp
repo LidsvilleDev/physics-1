@@ -295,91 +295,24 @@ void Init(PhysicsWorld& world)
     entity->position = { 418.0f, 650.0f };
     entity->gravity_scale = block_grav_scale;
     entity->collider_type = COLLIDER_TYPE_BOX;
-    entity->collider.box.extents = { 40.0f / 2.0f, 65.0 / 2.0f };
+    entity->collider.box.extents = { 100.0f / 2.0f, 70.0 / 2.0f };
     entity->inv_mass = block_mass;
 
     world.entities.push_back({});
     entity = &world.entities.back();
-    entity->position = { 418.0f, 595.0f };
+    entity->position = { 398.0f, 580.0f };
     entity->gravity_scale = block_grav_scale;
     entity->collider_type = COLLIDER_TYPE_BOX;
-    entity->collider.box.extents = { 40.0f / 2.0f, 65.0 / 2.0f };
+    entity->collider.box.extents = { 100.0f / 2.0f, 70.0 / 2.0f };
     entity->inv_mass = block_mass;
 
     world.entities.push_back({});
     entity = &world.entities.back();
-    entity->position = { 418.0f, 530.0f };
+    entity->position = { 418.0f, 510.0f };
     entity->gravity_scale = block_grav_scale;
     entity->collider_type = COLLIDER_TYPE_BOX;
-    entity->collider.box.extents = { 40.0f / 2.0f, 65.0 / 2.0f };
+    entity->collider.box.extents = { 100.0f / 2.0f, 70.0 / 2.0f };
     entity->inv_mass = block_mass;
-
-    // right side
-    world.entities.push_back({});
-    entity = &world.entities.back();
-    entity->position = { 606.0f, 650.0f };
-    entity->gravity_scale = block_grav_scale;
-    entity->collider_type = COLLIDER_TYPE_BOX;
-    entity->collider.box.extents = { 40.0f / 2.0f, 65.0 / 2.0f };
-    entity->inv_mass = block_mass;
-
-    world.entities.push_back({});
-    entity = &world.entities.back();
-    entity->position = { 606.0f, 595.0f };
-    entity->gravity_scale = block_grav_scale;
-    entity->collider_type = COLLIDER_TYPE_BOX;
-    entity->collider.box.extents = { 40.0f / 2.0f, 65.0 / 2.0f };
-    entity->inv_mass = block_mass;
-
-    world.entities.push_back({});
-    entity = &world.entities.back();
-    entity->position = { 606.0f, 530.0f };
-    entity->gravity_scale = block_grav_scale;
-    entity->collider_type = COLLIDER_TYPE_BOX;
-    entity->collider.box.extents = { 40.0f / 2.0f, 65.0 / 2.0f };
-    entity->inv_mass = block_mass;
-
-    // top
-    world.entities.push_back({});
-    entity = &world.entities.back();
-    entity->position = { 518.0f, 400.0f };
-    entity->gravity_scale = block_grav_scale;
-    entity->collider_type = COLLIDER_TYPE_BOX;
-    entity->collider.box.extents = { 241.0f / 2.0f, 10.0f / 2.0f };
-    entity->inv_mass = block_mass;
-    // BLOCKS END
-
-    // PIGS START
-    world.entities.push_back({});
-    entity = &world.entities.back();
-    entity->position = { 543.0f, 660.0f };
-    entity->gravity_scale = 1.0f;
-    entity->collider_type = COLLIDER_TYPE_CIRCLE;
-    entity->collider.circle.radius = 20.0f;
-    entity->inv_mass = 1.0f / 1.0f;
-    entity->toughness = 50.0f;
-    entity->color = GREEN;
-
-    world.entities.push_back({});
-    entity = &world.entities.back();
-    entity->position = { 493.0f, 660.0f };
-    entity->gravity_scale = 1.0f;
-    entity->collider_type = COLLIDER_TYPE_CIRCLE;
-    entity->collider.circle.radius = 20.0f;
-    entity->inv_mass = 1.0f / 1.0f;
-    entity->toughness = 50.0f;
-    entity->color = GREEN;
-
-    world.entities.push_back({});
-    entity = &world.entities.back();
-    entity->position = { 518.0f, 380.0f };
-    entity->gravity_scale = 1.0f;
-    entity->collider_type = COLLIDER_TYPE_CIRCLE;
-    entity->collider.circle.radius = 20.0f;
-    entity->inv_mass = 1.0f / 1.0f;
-    entity->toughness = 50.0f;
-    entity->color = GREEN;
-    // PIGS END
 
     // Ensure all half-space's have infinite mass (good habit to validate your entities after creation but before physics-loop)
     for (const PhysicsBody& e : world.entities)
