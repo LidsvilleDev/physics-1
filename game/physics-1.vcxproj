@@ -297,9 +297,11 @@
   <ItemGroup>
     <ClInclude Include="include\game.h" />
     <ClInclude Include="include\raygui.h" />
+    <ClInclude Include="src\Physics.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\Physics.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="src\raylib.ico" />
